@@ -1,4 +1,7 @@
+import threading
 import os
+from http.server import SimpleHTTPRequestHandler
+import socketserver
 import discord
 import requests
 from langdetect import detect
@@ -68,3 +71,13 @@ async def on_message(message):
 
 # Bot起動
 client.run(Discord_Token)
+
+def run_fake_server():
+    port = int(os.environ.get("PORT", 10000))  # Render が割り当てる PORT を取得
+    handler = SimpleHTTPRequestHandler
+    with socketserver.TCPServer(("", port), handler) as httpd:
+        print(f"Fake server running on port {port}")
+        httpd.serve_forever()
+
+# Bot の処理を別スレッドで動かす
+threading.Thread(target=run_fake_server, daemon=True).start()
