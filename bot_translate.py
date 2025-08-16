@@ -1,10 +1,12 @@
 import threading
 import os
-from http.server import SimpleHTTPRequestHandler
+from http.server import BaseHTTPRequestHandler, HTTPServer
 import socketserver
 import discord
 import requests
 from langdetect import detect
+import json
+import datetime
 
 # 環境変数から取得
 Discord_Token = os.getenv("Discord_Token")
@@ -19,6 +21,66 @@ client = discord.Client(intents=Intents)
 
 # Bot の動作状態を管理
 bot_active = True
+
+# カスタムHTTPハンドラー
+class KeepAliveHandler(BaseHTTPRequestHandler):
+    def do_GET(self):
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.end_headers()
+        
+        response_data = {
+            "status": "alive",
+            "bot_status": "active" if bot_active else "inactive",
+            "timestamp": datetime.datetime.now().isoformat(),
+            "message": "Discord Translator Bot is running"
+        }
+        
+        self.wfile.write(json.dumps(response_data).encode())
+        print(f"Keep-alive GET received at {datetime.datetime.now()}")
+    
+    def do_POST(self):
+        # POSTリクエストも適切に処理
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            if content_length > 0:
+                post_data = self.rfile.read(content_length)
+                try:
+                    data = json.loads(post_data.decode('utf-8'))
+                    print(f"Received POST data: {data}")
+                except:
+                    print(f"Non-JSON POST data received: {post_data.decode('utf-8', errors='ignore')}")
+            
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            response_data = {
+                "status": "received",
+                "bot_status": "active" if bot_active else "inactive",
+                "timestamp": datetime.datetime.now().isoformat(),
+                "message": "POST request processed"
+            }
+            
+            self.wfile.write(json.dumps(response_data).encode())
+            print(f"Keep-alive POST received at {datetime.datetime.now()}")
+            
+        except Exception as e:
+            print(f"POST処理エラー: {e}")
+            self.send_error(400, f"Bad Request: {e}")
+    
+    def do_HEAD(self):
+        # HEADリクエストにも対応
+        self.send_response(200)
+        self.send_header('Content-type', 'application/json')
+        self.end_headers()
+        print(f"Keep-alive HEAD received at {datetime.datetime.now()}")
+    
+    def log_message(self, format, *args):
+        # ログを簡潔にする（必要に応じてコメントアウト）
+        return
 
 # 言語判別関数
 def language(text):
@@ -119,25 +181,32 @@ async def on_message(message):
 
 def run_fake_server():
     port = int(os.environ.get("PORT", 10000))  # Render が割り当てる PORT を取得
-    handler = SimpleHTTPRequestHandler
-    with socketserver.TCPServer(("", port), handler) as httpd:
-        print(f"Fake server running on port {port}")
-        httpd.serve_forever()
+    
+    server = HTTPServer(("", port), KeepAliveHandler)
+    print(f"Keep-alive server running on port {port}")
+    server.serve_forever()
 
-# Keep-alive function for free hosting
+# Keep-alive function for free hosting (改良版)
 def keep_alive():
     import time
     import requests
-    app_url = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:10000")
+    
+    app_url = os.environ.get("RENDER_EXTERNAL_URL")
+    if not app_url:
+        print("RENDER_EXTERNAL_URL not set, skipping internal keep-alive")
+        return
     
     def ping():
         while True:
             try:
-                requests.get(app_url)
-                print("Keep-alive ping sent")
-            except:
-                print("Keep-alive ping failed")
-            time.sleep(300)  # 5分ごとにping
+                response = requests.get(app_url, timeout=30)
+                if response.status_code == 200:
+                    print(f"Internal keep-alive successful: {datetime.datetime.now()}")
+                else:
+                    print(f"Keep-alive warning: status {response.status_code}")
+            except Exception as e:
+                print(f"Keep-alive error: {e}")
+            time.sleep(600)  # 10分ごとに内部ping（GASと併用で重複を避ける）
     
     threading.Thread(target=ping, daemon=True).start()
 
