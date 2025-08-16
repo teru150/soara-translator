@@ -124,8 +124,51 @@ def run_fake_server():
         print(f"Fake server running on port {port}")
         httpd.serve_forever()
 
+# Keep-alive function for free hosting
+def keep_alive():
+    import time
+    import requests
+    app_url = os.environ.get("RENDER_EXTERNAL_URL", "http://localhost:10000")
+    
+    def ping():
+        while True:
+            try:
+                requests.get(app_url)
+                print("Keep-alive ping sent")
+            except:
+                print("Keep-alive ping failed")
+            time.sleep(300)  # 5分ごとにping
+    
+    threading.Thread(target=ping, daemon=True).start()
+
 # Bot の処理を別スレッドで動かす
 threading.Thread(target=run_fake_server, daemon=True).start()
+keep_alive()  # Keep-alive機能を開始
 
-# Bot起動
-client.run(Discord_Token)
+# Bot起動（エラーハンドリング付き）
+async def main():
+    while True:
+        try:
+            await client.start(Discord_Token)
+        except discord.ConnectionClosed:
+            print("Connection closed, attempting to reconnect...")
+            await client.close()
+        except Exception as e:
+            print(f"Unexpected error: {e}")
+            await client.close()
+        
+        # 5秒待ってから再接続を試行
+        import asyncio
+        await asyncio.sleep(5)
+
+# 非同期実行
+if __name__ == "__main__":
+    import asyncio
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("Bot stopped by user")
+    except Exception as e:
+        print(f"Fatal error: {e}")
+        # 通常の起動方法にフォールバック
+        client.run(Discord_Token)
